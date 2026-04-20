@@ -29,29 +29,39 @@ foto = st.file_uploader("📷 Sube la foto del albarán", type=['jpg', 'png', 'j
 
 if foto and st.button("🔍 Analizar Presupuesto"):
     try:
-        # Convertimos la imagen a formato que entienda la API directa
         img_bytes = foto.read()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
         
-        # URL de la API estable de Google (v1)
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+        # URL forzada a la versión estable
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         
         payload = {
             "contents": [{
                 "parts": [
-                    {"text": "Analiza este presupuesto. Extrae los productos en este formato exacto: NOMBRE | CANTIDAD | PRECIO_COSTE_UNITARIO. No escribas nada más."},
+                    {"text": "Extrae los artículos de este albarán. Formato: NOMBRE | CANTIDAD | PRECIO_COSTE_UNITARIO. No añadas nada más."},
                     {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
                 ]
-            }]
+            }],
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
         }
         
         response = requests.post(url, json=payload)
         res_json = response.json()
         
-        # Extraemos el texto de la respuesta
-        texto_ia = res_json['candidates'][0]['content']['parts'][0]['text']
-        
-        if texto_ia:
+        # COMPROBACIÓN DE ERRORES DE RESPUESTA
+        if 'error' in res_json:
+            st.error(f"❌ Error de Google: {res_json['error']['message']}")
+        elif 'candidates' not in res_json or not res_json['candidates'][0].get('content'):
+            st.warning("⚠️ La IA no ha podido leer datos claros. Intenta que la foto tenga más luz o esté mejor enfocada.")
+            if 'promptFeedback' in res_json:
+                st.info("Nota: La imagen ha sido filtrada por seguridad de Google.")
+        else:
+            texto_ia = res_json['candidates'][0]['content']['parts'][0]['text']
             for linea in texto_ia.split('\n'):
                 if '|' in linea:
                     p = linea.split('|')
@@ -65,16 +75,17 @@ if foto and st.button("🔍 Analizar Presupuesto"):
                             "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
                         })
                     except: continue
-            st.success("✅ ¡Analizado con éxito!")
+            st.success("✅ ¡Presupuesto generado!")
+            
     except Exception as e:
-        st.error(f"Error en la conexión directa: {e}")
+        st.error(f"Error inesperado: {e}")
 
 if st.session_state.lista:
     st.write(f"### Presupuesto: {cliente}")
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
     total = df["Total (€)"].sum()
-    st.subheader(f"TOTAL con IVA: {total * 1.21:.2f} €")
-    if st.button("Limpiar"):
+    st.subheader(f"TOTAL con IVA (21%): {total * 1.21:.2f} €")
+    if st.button("Limpiar datos"):
         st.session_state.lista = []
         st.rerun()
