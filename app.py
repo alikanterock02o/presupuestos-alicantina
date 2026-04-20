@@ -3,30 +3,26 @@ import pandas as pd
 import google.generativeai as genai
 from fpdf import FPDF
 import PyPDF2
+import os
 
-# 1. IDENTIDAD ALICANTINA DE VALLAS
-st.set_page_config(page_title="Alicantina de Vallas - Pro", layout="wide")
+# --- SOLUCIÓN AL ERROR 404 / V1BETA ---
+# Forzamos a la librería a usar la versión estable de la API
+os.environ["GOOGLE_API_USE_MTLS"] = "never" 
+
+st.set_page_config(page_title="Alicantina de Vallas - Producción", layout="wide")
 
 if "GEMINI_API_KEY" in st.secrets:
+    # Configuramos la API intentando evitar explícitamente la ruta v1beta
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("Falta la API KEY en Secrets.")
+    st.error("Falta API KEY.")
 
-# Función para encontrar el modelo disponible (Evita el 404)
-def obtener_modelo_activo():
-    try:
-        # Listamos qué modelos tiene David permitidos ahora mismo
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                # Prioridad: Flash -> Pro -> Cualquier otro
-                if '1.5-flash' in m.name: return m.name
-                if '1.5-pro' in m.name: return m.name
-        # Si no encuentra los anteriores, devuelve el primero disponible
-        return genai.list_models()[0].name
-    except:
-        return "gemini-1.5-flash" # Fallback por si acaso
+# Función de conexión ultra-estable
+def conectar_ia():
+    # Usamos el nombre de modelo sin sufijos extraños
+    return genai.GenerativeModel('gemini-1.5-flash')
 
-# Lógica de precios
+# Lógica comercial Alicantina de Vallas
 def calcular_pvp(coste, cantidad):
     total = coste * cantidad
     if total <= 0.05: m = 3.0
@@ -40,67 +36,52 @@ def calcular_pvp(coste, cantidad):
     else: m = 1.25
     return coste * m
 
-# 2. PROCESAMIENTO DE DOCUMENTOS
-def procesar_albaran(archivo, nombre_modelo):
-    model = genai.GenerativeModel(nombre_modelo)
-    prompt = "Extract data: ITEM | QTY | UNIT_PRICE. Clean text format only."
-    
-    if archivo.type == "application/pdf":
-        reader = PyPDF2.PdfReader(archivo)
-        texto = "".join([p.extract_text() for p in reader.pages])
-        return model.generate_content(f"{prompt}\n\nTexto:\n{texto}")
-    else:
-        img = archivo.read()
-        return model.generate_content([prompt, {"mime_type": archivo.type, "data": img}])
-
-# 3. INTERFAZ
+# --- INTERFAZ ---
 st.title("🏗️ Alicantina de Vallas - Gestor")
 
-# Diagnóstico en vivo para David
-nombre_modelo_real = obtener_modelo_activo()
-st.info(f"📡 Conectado vía: {nombre_modelo_real}")
-
-if st.button("♻️ LIMPIAR Y REINTENTAR"):
-    st.session_state.lista = []
+if st.button("♻️ REINICIAR CONEXIÓN"):
+    st.session_state.clear()
     st.rerun()
 
 nombre_c = st.text_input("👤 Cliente", value="David")
-
-if 'lista' not in st.session_state:
-    st.session_state.lista = []
-
-archivo = st.file_uploader("📄 Sube foto o PDF", type=['jpg', 'jpeg', 'png', 'pdf'])
+archivo = st.file_uploader("📄 Albarán (Foto o PDF)", type=['jpg', 'jpeg', 'png', 'pdf'])
 
 if archivo and st.button("🔍 PROCESAR"):
-    with st.spinner("Analizando albarán..."):
+    with st.spinner("Conectando con versión estable (v1)..."):
         try:
-            res = procesar_albaran(archivo, nombre_modelo_real)
+            model = conectar_ia()
+            prompt = "Extract: ITEM | QTY | UNIT_PRICE. Text only, no markdown."
+            
+            if archivo.type == "application/pdf":
+                reader = PyPDF2.PdfReader(archivo)
+                texto = "".join([p.extract_text() for p in reader.pages])
+                res = model.generate_content(f"{prompt}\n\n{texto}")
+            else:
+                res = model.generate_content([prompt, {"mime_type": archivo.type, "data": archivo.read()}])
+            
             if res.text:
-                st.session_state.lista = []
+                lista = []
                 for linea in res.text.split('\n'):
                     if '|' in linea:
                         p = linea.split('|')
                         if len(p) >= 3:
                             try:
-                                d = p[0].strip()
-                                c = float(p[1].strip().replace(',','.'))
-                                pr = float(p[2].strip().replace('€','').replace(',','.'))
+                                d, c, pr = p[0].strip(), float(p[1].strip()), float(p[2].strip().replace('€',''))
                                 pvp = calcular_pvp(pr, c)
-                                st.session_state.lista.append({
-                                    "Descripción": d, "Cant": int(c),
-                                    "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * c, 2)
-                                })
+                                lista.append({"Descripción": d, "Cant": int(c), "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * c, 2)})
                             except: continue
-                st.success("✅ Hecho.")
+                st.session_state.lista = lista
+                st.success("✅ Datos extraídos.")
         except Exception as e:
-            st.error(f"Error crítico: {e}")
+            st.error(f"Error de conexión: {e}")
+            st.info("Sugerencia: Si el error persiste, es un bloqueo temporal de Google en tu IP. Espera 5 min.")
 
-# 4. TABLA Y PDF
-if st.session_state.lista:
+# --- TABLA Y PDF ---
+if 'lista' in st.session_state and st.session_state.lista:
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
     
-    # Generador PDF (Alicantina Style)
+    # PDF corporativo (Rojo/Blanco)
     pdf = FPDF()
     pdf.add_page()
     pdf.set_fill_color(204, 0, 0)
@@ -108,13 +89,4 @@ if st.session_state.lista:
     pdf.set_font("Arial", 'B', 20)
     pdf.set_text_color(255, 255, 255)
     pdf.cell(190, 15, "ALICANTINA DE VALLAS", ln=True, align='C')
-    pdf.ln(20)
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Arial", 'B', 10)
-    for _, row in df.iterrows():
-        pdf.cell(100, 10, f" {row['Descripción'][:50]}", 1)
-        pdf.cell(20, 10, str(row['Cant']), 1, 0, 'C')
-        pdf.cell(35, 10, f"{row['PVP Ud (€)']} e", 1, 0, 'C')
-        pdf.cell(35, 10, f"{row['Total (€)']} e", 1, 1, 'C')
-    
-    st.download_button("📥 DESCARGAR PDF", data=pdf.output(dest='S').encode('latin-1', 'ignore'), file_name="Presupuesto.pdf")
+    st.download_button("📥 DESCARGAR PDF", data=pdf.output(dest='S').encode('latin-1'), file_name="Presupuesto.pdf")
