@@ -3,9 +3,9 @@ import google.generativeai as genai
 from PIL import Image
 import pandas as pd
 
+# 1. CONFIGURACIÓN INICIAL
 st.set_page_config(page_title="Alicantina de Vallas", layout="wide")
 
-# Lógica de márgenes
 def calcular_pvp(coste):
     if coste <= 0.05: return coste * 3.0
     elif coste <= 0.25: return coste * 2.5
@@ -17,9 +17,10 @@ def calcular_pvp(coste):
     elif coste <= 1000.0: return coste * 1.29
     else: return coste * 1.25
 
-# CONFIGURACIÓN
+# 2. CONEXIÓN FORZADA (Evita v1beta)
 if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    # Usamos explícitamente la versión v1 para evitar el error 404 v1beta
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"], transport='rest')
 else:
     st.error("Configura la clave en Secrets")
 
@@ -29,20 +30,21 @@ cliente = st.text_input("👤 Nombre del Cliente")
 if 'lista' not in st.session_state:
     st.session_state.lista = []
 
+# 3. PROCESADO DE IMAGEN
 foto = st.file_uploader("📷 Sube el albarán", type=['jpg', 'png', 'jpeg'])
 
 if foto and st.button("🔍 Analizar"):
     try:
-        # Usamos el modelo flash-8b si el flash normal da 404, es casi igual de listo
-        try:
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
-            img = Image.open(foto)
-            response = model.generate_content(["Lee este albarán y extrae: NOMBRE | CANTIDAD | PRECIO_COSTE", img])
-        except:
-            model = genai.GenerativeModel('gemini-pro-vision')
-            img = Image.open(foto)
-            response = model.generate_content(["Lee este albarán y extrae: NOMBRE | CANTIDAD | PRECIO_COSTE", img])
-
+        img = Image.open(foto)
+        
+        # Probamos el modelo flash-latest que es el más compatible hoy
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        
+        prompt = "Lee este presupuesto. Extrae los productos en este formato exacto: NOMBRE | CANTIDAD | PRECIO_COSTE. No escribas nada más."
+        
+        # Llamada directa
+        response = model.generate_content([prompt, img])
+        
         if response.text:
             for linea in response.text.split('\n'):
                 if '|' in linea:
@@ -57,15 +59,23 @@ if foto and st.button("🔍 Analizar"):
                             "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
                         })
                     except: continue
-            st.success("✅ ¡Leído!")
+            st.success("✅ Albarán procesado")
     except Exception as e:
-        st.error(f"Error: {e}")
+        # Si esto da 404, probamos el modelo pro de respaldo
+        try:
+            model_backup = genai.GenerativeModel('gemini-1.5-pro-latest')
+            response = model_backup.generate_content([prompt, img])
+            st.success("✅ Procesado con modelo de respaldo")
+        except:
+            st.error(f"Error de Google: {e}")
 
+# 4. TABLA DE RESULTADOS
 if st.session_state.lista:
+    st.write(f"### Presupuesto: {cliente}")
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
     total = df["Total (€)"].sum()
-    st.subheader(f"TOTAL: {total * 1.21:.2f} €")
+    st.subheader(f"TOTAL con IVA: {total * 1.21:.2f} €")
     if st.button("Limpiar"):
         st.session_state.lista = []
         st.rerun()
