@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
-from docx import Document
 import PyPDF2
+import requests
+import json
 
-st.set_page_config(page_title="Alicantina de Vallas - Docs", layout="wide")
+st.set_page_config(page_title="Alicantina de Vallas - Fix", layout="wide")
 
-# Lógica de márgenes
 def calcular_pvp(coste):
     if coste <= 0.05: return coste * 3.0
     elif coste <= 0.25: return coste * 2.5
@@ -18,64 +17,67 @@ def calcular_pvp(coste):
     elif coste <= 1000.0: return coste * 1.29
     else: return coste * 1.25
 
-# CONFIGURACIÓN
-if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-else:
-    st.error("Falta la API Key en Secrets")
-
-st.title("🏗️ Generador Alicantina de Vallas (Documentos)")
+st.title("🏗️ Generador Alicantina de Vallas")
+api_key = st.secrets["GEMINI_API_KEY"]
 cliente = st.text_input("👤 Nombre del Cliente")
 
 if 'lista' not in st.session_state:
     st.session_state.lista = []
 
-# CAMBIO: Ahora aceptamos PDF y Word
-archivo = st.file_uploader("📄 Sube el presupuesto (PDF o Word)", type=['pdf', 'docx'])
+archivo = st.file_uploader("📄 Sube el presupuesto (PDF)", type=['pdf'])
 
-if archivo and st.button("🔍 Analizar Documento"):
-    texto_extraido = ""
+if archivo and st.button("🔍 Analizar Presupuesto"):
     try:
-        # Leer Word
-        if archivo.name.endswith('.docx'):
-            doc = Document(archivo)
-            texto_extraido = "\n".join([para.text for para in doc.paragraphs])
-        # Leer PDF
-        else:
-            reader = PyPDF2.PdfReader(archivo)
-            for page in reader.pages:
-                texto_extraido += page.extract_text()
-
-        if texto_extraido:
-            # Usamos el modelo de texto puro, que NO da el error 404 de la cámara
-            model = genai.GenerativeModel('gemini-1.5-pro')
-            prompt = f"De este texto de presupuesto, extrae: PRODUCTO | CANTIDAD | PRECIO_COSTE. Texto: {texto_extraido}"
+        # 1. Extraer texto del PDF localmente
+        reader = PyPDF2.PdfReader(archivo)
+        texto_pdf = ""
+        for page in reader.pages:
+            texto_pdf += page.extract_text()
+        
+        if texto_pdf:
+            # 2. Llamada directa a la API (Ruta estable v1)
+            # Esta URL es manual para saltarnos el error 404 de la librería
+            url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
             
-            response = model.generate_content(prompt)
+            headers = {'Content-Type': 'application/json'}
+            payload = {
+                "contents": [{
+                    "parts": [{
+                        "text": f"Extrae los productos de este texto. Formato exacto: NOMBRE | CANTIDAD | PRECIO_COSTE. Texto: {texto_pdf}"
+                    }]
+                }]
+            }
             
-            for linea in response.text.split('\n'):
-                if '|' in linea:
-                    p = linea.split('|')
-                    try:
-                        desc = p[0].strip()
-                        cant = float(p[1].strip().replace(',', '.'))
-                        coste = float(p[2].strip().replace('€', '').replace(',', '.').strip())
-                        pvp = calcular_pvp(coste)
-                        st.session_state.lista.append({
-                            "Descripción": desc, "Cant": int(cant), 
-                            "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
-                        })
-                    except: continue
-            st.success("✅ Documento procesado")
+            response = requests.post(url, headers=headers, data=json.dumps(payload))
+            res_json = response.json()
+            
+            if 'candidates' in res_json:
+                texto_ia = res_json['candidates'][0]['content']['parts'][0]['text']
+                
+                for linea in texto_ia.split('\n'):
+                    if '|' in linea:
+                        p = linea.split('|')
+                        try:
+                            desc = p[0].strip()
+                            cant = float(p[1].strip().replace(',', '.'))
+                            coste = float(p[2].strip().replace('€', '').replace(',', '.').strip())
+                            pvp = calcular_pvp(coste)
+                            st.session_state.lista.append({
+                                "Descripción": desc, "Cant": int(cant), 
+                                "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
+                            })
+                        except: continue
+                st.success("✅ ¡Presupuesto procesado!")
+            else:
+                st.error(f"Error de Google: {res_json}")
     except Exception as e:
-        st.error(f"Error al leer el archivo: {e}")
+        st.error(f"Error técnico: {e}")
 
 if st.session_state.lista:
-    st.write(f"### Presupuesto: {cliente}")
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
     total = df["Total (€)"].sum()
-    st.subheader(f"TOTAL con IVA: {total * 1.21:.2f} €")
+    st.subheader(f"TOTAL con IVA (21%): {total * 1.21:.2f} €")
     if st.button("Limpiar"):
         st.session_state.lista = []
         st.rerun()
