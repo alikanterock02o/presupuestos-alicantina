@@ -25,7 +25,7 @@ try:
         st.error("❌ No he encontrado la clave API en los Secrets de Streamlit.")
     else:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-pro')
 except Exception as e:
     st.error(f"❌ Error de configuración: {e}")
 
