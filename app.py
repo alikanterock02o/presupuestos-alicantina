@@ -20,14 +20,30 @@ def calcular_pvp(coste):
     else: return coste * 1.25
 
 # INICIALIZAR IA
+# --- INICIALIZAR IA CON PRUEBA DE MODELOS ---
 try:
     if "GEMINI_API_KEY" not in st.secrets:
-        st.error("❌ No he encontrado la clave API en los Secrets de Streamlit.")
+        st.error("❌ No he encontrado la clave API en los Secrets.")
     else:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel('gemini-1.5-pro')
+        
+        # Probamos los 3 nombres posibles por orden de modernidad
+        modelos_a_probar = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro-vision']
+        model = None
+        
+        for nombre in modelos_a_probar:
+            try:
+                model = genai.GenerativeModel(nombre)
+                # Prueba rápida para ver si el modelo responde
+                st.write(f"🟢 Conectado con: {nombre}")
+                break
+            except:
+                continue
+        
+        if model is None:
+            st.error("❌ Ninguno de los modelos de Google está disponible con tu clave.")
 except Exception as e:
-    st.error(f"❌ Error de configuración: {e}")
+    st.error(f"❌ Error crítico: {e}")
 
 st.title("🏗️ Generador Automático de Presupuestos")
 st.write("Mantenimientos Alicantina de Vallas S.L.")
