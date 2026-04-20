@@ -53,11 +53,20 @@ with st.expander("📝 Confirmar datos del producto", expanded=True):
                     "Descripción": d, "Cant": n, "PVP Ud": round(pvp, 2), "Total": round(pvp * n, 2)
                 })
 
-# --- DISEÑO DEL PRESUPUESTO ---
+# --- DISEÑO DEL PRESUPUESTO CON LOGO ---
 if st.session_state.lista:
     st.markdown("---")
-    st.subheader("MANTENIMIENTOS ALICANTINA DE VALLAS S.L.")
-    st.write("Calle Burgos N12-14, 03015 Alicante")
+    col_logo, col_datos = st.columns([1, 4])
+    
+    with col_logo:
+        try:
+            st.image("logo.png", width=120) # Tu logo oficial
+        except:
+            st.warning("Sube 'logo.png' a GitHub para verlo aquí")
+            
+    with col_datos:
+        st.subheader("MANTENIMIENTOS ALICANTINA DE VALLAS S.L.")
+        st.write("Calle Burgos N12-14, 03015 Alicante | CIF: B54120274")
     
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
