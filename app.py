@@ -2,8 +2,7 @@ import json
 import re
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
-from google.generativeai import types
+from google import genai
 from fpdf import FPDF
 import PyPDF2
 import PIL.Image
@@ -13,9 +12,7 @@ st.set_page_config(page_title="Alicantina de Vallas - Gestor", layout="wide")
 # =====================================
 # 1. CONFIGURACIÓN API
 # =====================================
-if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-else:
+if "GEMINI_API_KEY" not in st.secrets:
     st.error("⚠️ Falta la API KEY en Secrets.")
     st.stop()
 
@@ -67,7 +64,6 @@ def limpiar_numero(valor):
     valor = str(valor).strip()
     valor = valor.replace("€", "").replace("EUR", "").replace("eur", "")
     valor = valor.replace(" ", "")
-
     valor = re.sub(r"[^0-9,.\-]", "", valor)
 
     if not valor:
@@ -90,9 +86,6 @@ def limpiar_texto_pdf(texto):
 
 
 def extraer_json_desde_texto(texto):
-    """
-    Intenta localizar el primer bloque JSON válido dentro de la respuesta.
-    """
     texto = texto.strip()
 
     try:
@@ -111,11 +104,13 @@ def extraer_json_desde_texto(texto):
 
 
 # =====================================
-# 4. EXTRACCIÓN CON GEMINI EN JSON
+# 4. EXTRACCIÓN CON GEMINI
 # =====================================
 def analizar_documento(archivo):
-    opciones = types.RequestOptions(api_version="v1")
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    client = genai.Client(
+        api_key=st.secrets["GEMINI_API_KEY"],
+        http_options={"api_version": "v1"}
+    )
 
     prompt = """
 Extrae los productos del documento y devuelve SOLO un JSON válido.
@@ -153,18 +148,21 @@ Reglas:
                     "error": "No se pudo extraer texto del PDF. Puede ser un PDF escaneado como imagen."
                 }
 
-            response = model.generate_content(
-                prompt + "\n\nDOCUMENTO:\n" + texto,
-                request_options=opciones
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt + "\n\nDOCUMENTO:\n" + texto
             )
+
         else:
             img = PIL.Image.open(archivo)
-            response = model.generate_content(
-                [prompt, img],
-                request_options=opciones
+
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[prompt, img]
             )
 
         texto_respuesta = getattr(response, "text", None)
+
         if not texto_respuesta:
             return {
                 "ok": False,
@@ -249,6 +247,13 @@ def recalcular_dataframe(df):
             cantidad = limpiar_numero(row["Cant"])
             coste_ud = limpiar_numero(row["Coste Ud (€)"])
 
+            if not descripcion:
+                continue
+            if cantidad <= 0:
+                continue
+            if coste_ud < 0:
+                continue
+
             pvp_ud, margen = calcular_pvp_unitario(coste_ud, cantidad)
             total_coste = coste_ud * cantidad
             total = pvp_ud * cantidad
@@ -280,7 +285,7 @@ class PDFPresupuesto(FPDF):
     def footer(self):
         self.set_y(-15)
         self.set_font("Arial", "I", 8)
-        self.cell(0, 10, f"Página {self.page_no()}", align="C")
+        self.cell(0, 10, f"Pagina {self.page_no()}", align="C")
 
 
 def texto_seguro_pdf(texto):
@@ -301,7 +306,7 @@ def texto_seguro_pdf(texto):
     return texto.encode("latin-1", "replace").decode("latin-1")
 
 
-def generar_pdf(nombre_cliente, df):
+def generar_pdf(nombre_cliente, df, aplicar_iva=False):
     pdf = PDFPresupuesto()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -310,7 +315,6 @@ def generar_pdf(nombre_cliente, df):
     pdf.cell(0, 8, texto_seguro_pdf(f"Cliente: {nombre_cliente}"), ln=True)
     pdf.ln(4)
 
-    # Cabecera
     pdf.set_font("Arial", "B", 9)
     pdf.cell(80, 8, "Descripcion", border=1)
     pdf.cell(18, 8, "Cant", border=1, align="C")
@@ -319,7 +323,7 @@ def generar_pdf(nombre_cliente, df):
 
     pdf.set_font("Arial", "", 8)
 
-    total_general = 0.0
+    subtotal = 0.0
 
     for _, row in df.iterrows():
         descripcion = texto_seguro_pdf(str(row["Descripción"])[:48])
@@ -332,11 +336,19 @@ def generar_pdf(nombre_cliente, df):
         pdf.cell(30, 8, pvp_ud, border=1, align="C")
         pdf.cell(30, 8, total_linea, border=1, ln=True, align="C")
 
-        total_general += float(row["Total (€)"])
+        subtotal += float(row["Total (€)"])
+
+    iva = subtotal * 0.21 if aplicar_iva else 0.0
+    total_final = subtotal + iva
 
     pdf.ln(4)
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 10, texto_seguro_pdf(f"TOTAL PRESUPUESTO: {total_general:.2f} EUR"), ln=True, align="R")
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(0, 8, texto_seguro_pdf(f"Subtotal: {subtotal:.2f} EUR"), ln=True, align="R")
+
+    if aplicar_iva:
+        pdf.cell(0, 8, texto_seguro_pdf(f"IVA 21%: {iva:.2f} EUR"), ln=True, align="R")
+
+    pdf.cell(0, 10, texto_seguro_pdf(f"TOTAL PRESUPUESTO: {total_final:.2f} EUR"), ln=True, align="R")
 
     return pdf.output(dest="S").encode("latin-1")
 
@@ -356,6 +368,7 @@ with col2:
     aplicar_iva = st.checkbox("Añadir IVA 21%", value=False)
 
 with col3:
+    st.write("")
     if st.button("♻️ Reiniciar", use_container_width=True):
         st.session_state.clear()
         st.rerun()
@@ -394,7 +407,6 @@ if "datos" in st.session_state and st.session_state["datos"]:
     st.subheader("Líneas del presupuesto")
 
     df_inicial = pd.DataFrame(st.session_state["datos"])
-
     columnas_editables = ["Descripción", "Cant", "Coste Ud (€)"]
     df_editable = df_inicial[columnas_editables].copy()
 
@@ -420,7 +432,7 @@ if "datos" in st.session_state and st.session_state["datos"]:
         c2.metric("IVA", f"{iva:.2f} €")
         c3.metric("Total final", f"{total_final:.2f} €")
 
-        pdf_bytes = generar_pdf(nombre_cliente, df_final)
+        pdf_bytes = generar_pdf(nombre_cliente, df_final, aplicar_iva=aplicar_iva)
 
         st.download_button(
             "📥 Descargar presupuesto PDF",
