@@ -4,17 +4,10 @@ import google.generativeai as genai
 from PIL import Image
 import io
 
-# 1. CONFIGURACIÓN Y CEREBRO (GEMINI)
-st.set_page_config(page_title="Alicantina de Vallas - Auto", page_icon="🏗️", layout="wide")
+# CONFIGURACIÓN
+st.set_page_config(page_title="Alicantina de Vallas - Smart", page_icon="🏗️", layout="wide")
 
-# Conectar con la clave que guardaste en Secrets
-try:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
-except:
-    st.error("⚠️ Error con la clave API. Revisa los Secrets en Streamlit.")
-
-# LÓGICA DE MÁRGENES
+# MÁRGENES
 def calcular_pvp(coste):
     if coste <= 0.05: return coste * 3.0
     elif coste <= 0.25: return coste * 2.5
@@ -26,62 +19,66 @@ def calcular_pvp(coste):
     elif coste <= 1000.0: return coste * 1.29
     else: return coste * 1.25
 
-# 2. INTERFAZ DE USUARIO
+# INICIALIZAR IA
+try:
+    if "GEMINI_API_KEY" not in st.secrets:
+        st.error("❌ No he encontrado la clave API en los Secrets de Streamlit.")
+    else:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        model = genai.GenerativeModel('gemini-1.5-flash')
+except Exception as e:
+    st.error(f"❌ Error de configuración: {e}")
+
 st.title("🏗️ Generador Automático de Presupuestos")
 st.write("Mantenimientos Alicantina de Vallas S.L.")
 
-# Campos principales
-cliente = st.text_input("👤 Nombre del Cliente Final", placeholder="Ej: Juan Pérez / Comunidad Propietarios X")
+cliente = st.text_input("👤 Nombre del Cliente Final")
 
-if 'lista' not in st.session_state: st.session_state.lista = []
+if 'lista' not in st.session_state: 
+    st.session_state.lista = []
 
-# 3. CARGA DE FOTO Y MAGIA IA
-st.subheader("📷 Subir Albarán del Proveedor")
-foto = st.file_uploader("Arrastra aquí la foto o captura del presupuesto del proveedor", type=['jpg', 'png', 'jpeg'])
+# SUBIDA DE FOTO
+foto = st.file_uploader("📷 Sube la foto del albarán", type=['jpg', 'png', 'jpeg'])
 
-if foto and not st.session_state.lista:
-    with st.spinner('IA analizando el albarán...'):
-        img = Image.open(foto)
-        # Instrucción para la IA
-        prompt = """Analiza este albarán. Extrae los productos. 
-        Para cada producto devuelve SOLO una línea con este formato: 
-        NOMBRE | CANTIDAD | PRECIO_COSTE_UNITARIO
-        Usa punto para los decimales. No escribas nada más."""
-        
-        response = model.generate_content([prompt, img])
-        
-        # Procesar la respuesta de la IA y meterla en la lista
-        lineas = response.text.split('\n')
-        for linea in lineas:
-            if '|' in linea:
-                partes = linea.split('|')
-                try:
-                    desc = partes[0].strip()
-                    cant = int(float(partes[1].strip()))
-                    coste = float(partes[2].strip())
-                    pvp = calcular_pvp(coste)
-                    st.session_state.lista.append({
-                        "Descripción": desc,
-                        "Cant": cant,
-                        "Precio Ud. (€)": round(pvp, 2),
-                        "Total (€)": round(pvp * cant, 2)
-                    })
-                except: continue
-        st.success("¡Albarán procesado con éxito!")
+if foto and st.button("🔍 Analizar Albarán"):
+    try:
+        with st.spinner('Leyendo imagen con IA...'):
+            img = Image.open(foto)
+            # Convertir a RGB por si es un PNG con transparencia
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            
+            prompt = "Analiza este albarán. Extrae productos en este formato: NOMBRE | CANTIDAD | PRECIO_COSTE. Usa punto para decimales."
+            response = model.generate_content([prompt, img])
+            
+            # Limpiar lista antes de nueva lectura si quieres, o dejar que acumule
+            lineas = response.text.split('\n')
+            for linea in lineas:
+                if '|' in linea:
+                    p = linea.split('|')
+                    try:
+                        desc = p[0].strip()
+                        cant = int(float(p[1].strip()))
+                        coste = float(p[2].strip().replace('€', '').replace('$', ''))
+                        pvp = calcular_pvp(coste)
+                        st.session_state.lista.append({
+                            "Descripción": desc, "Cant": cant, 
+                            "Precio Ud. (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
+                        })
+                    except: continue
+            st.success("¡Lectura completada!")
+    except Exception as e:
+        st.error(f"⚠️ La IA ha tenido un problema: {e}")
 
-# 4. TABLA DE RESULTADOS Y PDF
+# TABLA Y PDF
 if st.session_state.lista:
-    st.markdown(f"### Presupuesto para: **{cliente if cliente else '__________'}**")
-    
+    st.write(f"### Presupuesto: {cliente}")
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
     
-    total_base = df["Total (€)"].sum()
-    st.write(f"**Base Imponible:** {total_base:.2f} €")
-    st.subheader(f"TOTAL (IVA Inc.): {total_base * 1.21:.2f} €")
+    base = df["Total (€)"].sum()
+    st.subheader(f"TOTAL (IVA Inc.): {base * 1.21:.2f} €")
     
-    if st.button("🗑️ Borrar y Nuevo Presupuesto"):
+    if st.button("🗑️ Limpiar"):
         st.session_state.lista = []
         st.rerun()
-
-    st.info("💡 Pulsa Ctrl+P para guardar como PDF.")
