@@ -21,9 +21,9 @@ st.set_page_config(
 # =====================================
 EMPRESA_NOMBRE = "Alicantina de Vallas"
 EMPRESA_SUBTITULO = "Presupuestos"
-EMPRESA_DIRECCION = "Torrellano, Alicante"
-EMPRESA_EMAIL = "info@alicantinadevallas.com"
-EMPRESA_TELEFONO = "965 XXX XXX"
+EMPRESA_DIRECCION = "Calle Burgos 12-14, 03015, Alicante"
+EMPRESA_EMAIL = "compras@alicantinadevallas.com"
+EMPRESA_TELEFONO = "692 607 896"
 EMPRESA_WEB = "www.alicantinadevallas.com"
 LOGO_PATH = "logo.png"   # pon tu logo en la raíz del proyecto
 
