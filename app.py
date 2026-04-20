@@ -1,10 +1,18 @@
 import streamlit as st
 import pandas as pd
-import pytesseract
+import google.generativeai as genai
 from PIL import Image
-import re
+import io
 
-st.set_page_config(page_title="Alicantina de Vallas - Smart", page_icon="🏗️")
+# 1. CONFIGURACIÓN Y CEREBRO (GEMINI)
+st.set_page_config(page_title="Alicantina de Vallas - Auto", page_icon="🏗️", layout="wide")
+
+# Conectar con la clave que guardaste en Secrets
+try:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    model = genai.GenerativeModel('gemini-1.5-flash')
+except:
+    st.error("⚠️ Error con la clave API. Revisa los Secrets en Streamlit.")
 
 # LÓGICA DE MÁRGENES
 def calcular_pvp(coste):
@@ -16,64 +24,64 @@ def calcular_pvp(coste):
     elif coste <= 50.0: return coste * 1.43
     elif coste <= 300.0: return coste * 1.35
     elif coste <= 1000.0: return coste * 1.29
-    elif coste <= 3000.0: return coste * 1.25
-    else: return coste * 1.20
+    else: return coste * 1.25
 
-st.title("🏗️ Lector de Albaranes Inteligente")
+# 2. INTERFAZ DE USUARIO
+st.title("🏗️ Generador Automático de Presupuestos")
+st.write("Mantenimientos Alicantina de Vallas S.L.")
+
+# Campos principales
+cliente = st.text_input("👤 Nombre del Cliente Final", placeholder="Ej: Juan Pérez / Comunidad Propietarios X")
 
 if 'lista' not in st.session_state: st.session_state.lista = []
 
-# --- SECCIÓN DE LECTURA DE FOTO ---
-st.sidebar.header("📷 Escanear Albarán")
-foto = st.sidebar.file_uploader("Sube la foto del proveedor", type=['jpg', 'png', 'jpeg'])
+# 3. CARGA DE FOTO Y MAGIA IA
+st.subheader("📷 Subir Albarán del Proveedor")
+foto = st.file_uploader("Arrastra aquí la foto o captura del presupuesto del proveedor", type=['jpg', 'png', 'jpeg'])
 
-if foto:
-    img = Image.open(foto)
-    texto = pytesseract.image_to_string(img)
-    st.sidebar.success("¡Foto leída!")
-    
-    # Intento de extraer precios automáticamente (Busca números con decimales)
-    precios = re.findall(r'\d+,\d{2}', texto)
-    if precios:
-        st.sidebar.write("He detectado estos posibles importes:")
-        for p in precios[:5]: # Mostramos los 5 primeros para no saturar
-            st.sidebar.code(f"{p} €")
+if foto and not st.session_state.lista:
+    with st.spinner('IA analizando el albarán...'):
+        img = Image.open(foto)
+        # Instrucción para la IA
+        prompt = """Analiza este albarán. Extrae los productos. 
+        Para cada producto devuelve SOLO una línea con este formato: 
+        NOMBRE | CANTIDAD | PRECIO_COSTE_UNITARIO
+        Usa punto para los decimales. No escribas nada más."""
+        
+        response = model.generate_content([prompt, img])
+        
+        # Procesar la respuesta de la IA y meterla en la lista
+        lineas = response.text.split('\n')
+        for linea in lineas:
+            if '|' in linea:
+                partes = linea.split('|')
+                try:
+                    desc = partes[0].strip()
+                    cant = int(float(partes[1].strip()))
+                    coste = float(partes[2].strip())
+                    pvp = calcular_pvp(coste)
+                    st.session_state.lista.append({
+                        "Descripción": desc,
+                        "Cant": cant,
+                        "Precio Ud. (€)": round(pvp, 2),
+                        "Total (€)": round(pvp * cant, 2)
+                    })
+                except: continue
+        st.success("¡Albarán procesado con éxito!")
 
-# --- FORMULARIO MANUAL / CONFIRMACIÓN ---
-with st.expander("📝 Confirmar datos del producto", expanded=True):
-    with st.form("add_form", clear_on_submit=True):
-        col1, col2, col3 = st.columns([3, 1, 1])
-        d = col1.text_input("Producto / Descripción")
-        n = col2.number_input("Cant", min_value=1, value=1)
-        c = col3.number_input("Coste Proveedor (€)", min_value=0.0, step=0.01)
-        if st.form_submit_button("Añadir al Presupuesto"):
-            if d:
-                pvp = calcular_pvp(c)
-                st.session_state.lista.append({
-                    "Descripción": d, "Cant": n, "PVP Ud": round(pvp, 2), "Total": round(pvp * n, 2)
-                })
-
-# --- DISEÑO DEL PRESUPUESTO CON LOGO ---
+# 4. TABLA DE RESULTADOS Y PDF
 if st.session_state.lista:
-    st.markdown("---")
-    col_logo, col_datos = st.columns([1, 4])
-    
-    with col_logo:
-        try:
-            st.image("logo.png", width=120) # Tu logo oficial
-        except:
-            st.warning("Sube 'logo.png' a GitHub para verlo aquí")
-            
-    with col_datos:
-        st.subheader("MANTENIMIENTOS ALICANTINA DE VALLAS S.L.")
-        st.write("Calle Burgos N12-14, 03015 Alicante | CIF: B54120274")
+    st.markdown(f"### Presupuesto para: **{cliente if cliente else '__________'}**")
     
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
     
-    total = df["Total"].sum()
-    st.metric("TOTAL (con IVA)", f"{total * 1.21:.2f} €")
+    total_base = df["Total (€)"].sum()
+    st.write(f"**Base Imponible:** {total_base:.2f} €")
+    st.subheader(f"TOTAL (IVA Inc.): {total_base * 1.21:.2f} €")
     
-    if st.button("Limpiar todo"):
+    if st.button("🗑️ Borrar y Nuevo Presupuesto"):
         st.session_state.lista = []
         st.rerun()
+
+    st.info("💡 Pulsa Ctrl+P para guardar como PDF.")
