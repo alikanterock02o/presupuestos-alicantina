@@ -1,12 +1,12 @@
 import streamlit as st
 import pandas as pd
-import requests
-import base64
-from PIL import Image
-import io
+import google.generativeai as genai
+from docx import Document
+import PyPDF2
 
-st.set_page_config(page_title="Alicantina de Vallas", layout="wide")
+st.set_page_config(page_title="Alicantina de Vallas - Docs", layout="wide")
 
+# Lógica de márgenes
 def calcular_pvp(coste):
     if coste <= 0.05: return coste * 3.0
     elif coste <= 0.25: return coste * 2.5
@@ -18,51 +18,42 @@ def calcular_pvp(coste):
     elif coste <= 1000.0: return coste * 1.29
     else: return coste * 1.25
 
-st.title("🏗️ Generador Alicantina de Vallas")
-api_key = st.secrets["GEMINI_API_KEY"]
+# CONFIGURACIÓN
+if "GEMINI_API_KEY" in st.secrets:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+else:
+    st.error("Falta la API Key en Secrets")
+
+st.title("🏗️ Generador Alicantina de Vallas (Documentos)")
 cliente = st.text_input("👤 Nombre del Cliente")
 
 if 'lista' not in st.session_state:
     st.session_state.lista = []
 
-foto = st.file_uploader("📷 Sube la foto del albarán", type=['jpg', 'png', 'jpeg'])
+# CAMBIO: Ahora aceptamos PDF y Word
+archivo = st.file_uploader("📄 Sube el presupuesto (PDF o Word)", type=['pdf', 'docx'])
 
-if foto and st.button("🔍 Analizar Presupuesto"):
+if archivo and st.button("🔍 Analizar Documento"):
+    texto_extraido = ""
     try:
-        img_bytes = foto.read()
-        img_b64 = base64.b64encode(img_bytes).decode('utf-8')
-        
-        # URL forzada a la versión estable
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"text": "Extrae los artículos de este albarán. Formato: NOMBRE | CANTIDAD | PRECIO_COSTE_UNITARIO. No añadas nada más."},
-                    {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
-                ]
-            }],
-            "safetySettings": [
-                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-            ]
-        }
-        
-        response = requests.post(url, json=payload)
-        res_json = response.json()
-        
-        # COMPROBACIÓN DE ERRORES DE RESPUESTA
-        if 'error' in res_json:
-            st.error(f"❌ Error de Google: {res_json['error']['message']}")
-        elif 'candidates' not in res_json or not res_json['candidates'][0].get('content'):
-            st.warning("⚠️ La IA no ha podido leer datos claros. Intenta que la foto tenga más luz o esté mejor enfocada.")
-            if 'promptFeedback' in res_json:
-                st.info("Nota: La imagen ha sido filtrada por seguridad de Google.")
+        # Leer Word
+        if archivo.name.endswith('.docx'):
+            doc = Document(archivo)
+            texto_extraido = "\n".join([para.text for para in doc.paragraphs])
+        # Leer PDF
         else:
-            texto_ia = res_json['candidates'][0]['content']['parts'][0]['text']
-            for linea in texto_ia.split('\n'):
+            reader = PyPDF2.PdfReader(archivo)
+            for page in reader.pages:
+                texto_extraido += page.extract_text()
+
+        if texto_extraido:
+            # Usamos el modelo de texto puro, que NO da el error 404 de la cámara
+            model = genai.GenerativeModel('gemini-1.5-pro')
+            prompt = f"De este texto de presupuesto, extrae: PRODUCTO | CANTIDAD | PRECIO_COSTE. Texto: {texto_extraido}"
+            
+            response = model.generate_content(prompt)
+            
+            for linea in response.text.split('\n'):
                 if '|' in linea:
                     p = linea.split('|')
                     try:
@@ -75,17 +66,16 @@ if foto and st.button("🔍 Analizar Presupuesto"):
                             "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
                         })
                     except: continue
-            st.success("✅ ¡Presupuesto generado!")
-            
+            st.success("✅ Documento procesado")
     except Exception as e:
-        st.error(f"Error inesperado: {e}")
+        st.error(f"Error al leer el archivo: {e}")
 
 if st.session_state.lista:
     st.write(f"### Presupuesto: {cliente}")
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
     total = df["Total (€)"].sum()
-    st.subheader(f"TOTAL con IVA (21%): {total * 1.21:.2f} €")
-    if st.button("Limpiar datos"):
+    st.subheader(f"TOTAL con IVA: {total * 1.21:.2f} €")
+    if st.button("Limpiar"):
         st.session_state.lista = []
         st.rerun()
