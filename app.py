@@ -17,61 +17,71 @@ def calcular_pvp(coste):
     elif coste <= 1000.0: return coste * 1.29
     else: return coste * 1.25
 
-# 2. CONEXIÓN (Secrets)
-if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# 2. CONEXIÓN INTELIGENTE
+if "GEMINI_API_KEY" not in st.secrets:
+    st.error("❌ Falta la clave en Secrets")
 else:
-    st.error("Falta la clave API en Secrets")
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 st.title("🏗️ Generador Alicantina de Vallas")
-
-cliente = st.text_input("👤 Nombre del Cliente Final")
+cliente = st.text_input("👤 Nombre del Cliente")
 
 if 'lista' not in st.session_state:
     st.session_state.lista = []
 
-# 3. SUBIDA DE FOTO
 foto = st.file_uploader("📷 Sube el presupuesto del proveedor", type=['jpg', 'png', 'jpeg'])
 
 if foto and st.button("🔍 Analizar Presupuesto"):
     try:
         img = Image.open(foto)
-        # Usamos el modelo 'gemini-1.5-flash' que es el estándar actual
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+            
+        # PROBAMOS VARIOS MODELOS POR SI UNO FALLA
+        modelos_disponibles = ['gemini-1.5-flash', 'gemini-pro-vision']
+        response = None
         
-        prompt = "Analiza este presupuesto. Extrae los artículos en este formato exacto: NOMBRE | CANTIDAD | PRECIO_COSTE. Usa puntos para decimales."
+        for nombre_modelo in modelos_disponibles:
+            try:
+                model = genai.GenerativeModel(nombre_modelo)
+                prompt = "Extrae los productos de esta imagen en formato: NOMBRE | CANTIDAD | PRECIO_COSTE"
+                response = model.generate_content([prompt, img])
+                if response:
+                    st.toast(f"✅ Conectado vía {nombre_modelo}")
+                    break
+            except:
+                continue
         
-        response = model.generate_content([prompt, img])
-        
-        # Procesar texto
-        lineas = response.text.split('\n')
-        for linea in lineas:
-            if '|' in linea:
-                partes = linea.split('|')
-                try:
-                    desc = partes[0].strip()
-                    cant = float(partes[1].strip().replace(',', '.'))
-                    coste = float(partes[2].strip().replace(',', '.').replace('€', ''))
-                    pvp = calcular_pvp(coste)
-                    st.session_state.lista.append({
-                        "Descripción": desc, "Cant": int(cant), 
-                        "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
-                    })
-                except: continue
-        st.success("¡Leído!")
+        if response:
+            lineas = response.text.split('\n')
+            for linea in lineas:
+                if '|' in linea:
+                    partes = linea.split('|')
+                    try:
+                        desc = partes[0].strip()
+                        cant = float(partes[1].strip().replace(',', '.'))
+                        coste = float(partes[2].strip().replace(',', '.').replace('€', '').replace('$', ''))
+                        pvp = calcular_pvp(coste)
+                        st.session_state.lista.append({
+                            "Descripción": desc, "Cant": int(cant), 
+                            "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
+                        })
+                    except: continue
+            st.success("¡Lectura finalizada!")
+        else:
+            st.error("❌ Google no responde. Revisa tu API Key.")
+            
     except Exception as e:
-        st.error(f"Hubo un problema: {e}")
+        st.error(f"Error inesperado: {e}")
 
-# 4. RESULTADO
+# 3. MOSTRAR RESULTADOS
 if st.session_state.lista:
     st.markdown("---")
-    st.write(f"### Presupuesto para: {cliente}")
+    st.subheader(f"Presupuesto: {cliente}")
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
-    
     total = df["Total (€)"].sum()
     st.subheader(f"TOTAL con IVA: {total * 1.21:.2f} €")
-    
-    if st.button("Limpiar todo"):
+    if st.button("Limpiar"):
         st.session_state.lista = []
         st.rerun()
