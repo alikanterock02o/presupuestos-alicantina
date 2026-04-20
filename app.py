@@ -1,61 +1,59 @@
 import streamlit as st
 import pandas as pd
 
-# Configuración de la página
+# 1. CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="Presupuestos Alicantina", page_icon="🏗️")
 
-# Lógica de márgenes corregida (valores de la izquierda)
+# 2. LÓGICA DE MÁRGENES (SEGÚN TU TABLA REAL)
 def calcular_pvp(coste):
     if coste <= 0.05: return coste * 3.0
     elif coste <= 0.25: return coste * 2.5
     elif coste <= 1.0: return coste * 2.0
     elif coste <= 3.0: return coste * 1.75
-    elif coste <= 10.0: return coste * 1.50  # +50%
-    elif coste <= 50.0: return coste * 1.43  # +43%
-    elif coste <= 300.0: return coste * 1.35 # +35%
-    elif coste <= 1000.0: return coste * 1.29
-    elif coste <= 3000.0: return coste * 1.25
-    else: return coste * 1.20
+    elif coste <= 10.0: return coste * 1.50  # Margen 50%
+    elif coste <= 50.0: return coste * 1.43  # Margen 43%
+    elif coste <= 300.0: return coste * 1.35 # Margen 35%
+    elif coste <= 1000.0: return coste * 1.29 # Margen 29%
+    elif coste <= 3000.0: return coste * 1.25 # Margen 25%
+    else: return coste * 1.20                  # Margen 20%
 
+# 3. INTERFAZ
 st.title("🏗️ Generador de Presupuestos")
-st.subheader("Mantenimientos Alicantina de Vallas S.L.")
+st.write("Mantenimientos Alicantina de Vallas S.L.")
 
-# Inicializar la lista de productos si no existe
-if 'items' not in st.session_state:
-    st.session_state.items = []
+# Inicializar lista si está vacía
+if 'lista_productos' not in st.session_state:
+    st.session_state.lista_productos = []
 
-# Formulario de entrada
-with st.form("nuevo_item", clear_on_submit=True):
-    col1, col2, col3 = st.columns([3, 1, 1])
-    desc = col1.text_input("Descripción del producto")
-    cant = col2.number_input("Cantidad", min_value=1, value=1)
-    coste = col3.number_input("Coste Unitario (€)", min_value=0.0, step=0.01)
-    add = st.form_submit_button("Añadir al presupuesto")
+# Formulario para añadir productos
+with st.form("form_añadir", clear_on_submit=True):
+    c1, c2, c3 = st.columns([3, 1, 1])
+    d = c1.text_input("Producto")
+    n = c2.number_input("Cant", min_value=1, value=1)
+    c = c3.number_input("Coste Unit (€)", min_value=0.0, step=0.01)
+    boton = st.form_submit_button("Añadir")
 
-if add and desc:
-    pvp_unit = calcular_pvp(coste)
-    st.session_state.items.append({
-        "Descripción": desc,
-        "Cant": cant,
-        "Precio Ud. (€)": round(pvp_unit, 2),
-        "Total (€)": round(pvp_unit * cant, 2)
+if boton and d:
+    precio_venta = calcular_pvp(c)
+    st.session_state.lista_productos.append({
+        "Descripción": d,
+        "Cant": n,
+        "Precio Ud.": round(precio_venta, 2),
+        "Total": round(precio_venta * n, 2)
     })
 
-# SOLO mostrar la tabla si hay productos (esto evita tu error actual)
-if len(st.session_state.items) > 0:
-    df = pd.DataFrame(st.session_state.items)
+# 4. TABLA Y RESULTADOS
+if len(st.session_state.lista_productos) > 0:
+    df = pd.DataFrame(st.session_state.lista_productos)
     st.table(df)
     
-    base_imponible = df["Total (€)"].sum()
-    iva = base_imponible * 0.21
-    total = base_imponible + iva
+    subtotal = df["Total"].sum()
+    iva = subtotal * 0.21
+    st.write(f"**Base:** {subtotal:.2f}€ | **IVA:** {iva:.2f}€")
+    st.success(f"### TOTAL: {subtotal + iva:.2f}€")
     
-    st.write(f"**Base Imponible:** {base_imponible:.2f} €")
-    st.write(f"**IVA (21%):** {iva:.2f} €")
-    st.success(f"### TOTAL PRESUPUESTO: {total:.2f} €")
-    
-    if st.button("Limpiar Presupuesto"):
-        st.session_state.items = []
+    if st.button("Borrar todo"):
+        st.session_state.lista_productos = []
         st.rerun()
 else:
-    st.info("Añade productos arriba para empezar a generar el presupuesto.")
+    st.info("Introduce un producto para empezar.")
