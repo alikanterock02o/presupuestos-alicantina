@@ -1,7 +1,6 @@
 streamlit
 pandas
 PyPDF2
-requests
 Pillow
 fpdf
 google-generativeai>=0.8.3
