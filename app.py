@@ -1,9 +1,10 @@
 import streamlit as st
-import google.generativeai as genai
-from PIL import Image
 import pandas as pd
+import requests
+import base64
+from PIL import Image
+import io
 
-# 1. CONFIGURACIÓN INICIAL
 st.set_page_config(page_title="Alicantina de Vallas", layout="wide")
 
 def calcular_pvp(coste):
@@ -17,36 +18,41 @@ def calcular_pvp(coste):
     elif coste <= 1000.0: return coste * 1.29
     else: return coste * 1.25
 
-# 2. CONEXIÓN FORZADA (Evita v1beta)
-if "GEMINI_API_KEY" in st.secrets:
-    # Usamos explícitamente la versión v1 para evitar el error 404 v1beta
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"], transport='rest')
-else:
-    st.error("Configura la clave en Secrets")
-
 st.title("🏗️ Generador Alicantina de Vallas")
+api_key = st.secrets["GEMINI_API_KEY"]
 cliente = st.text_input("👤 Nombre del Cliente")
 
 if 'lista' not in st.session_state:
     st.session_state.lista = []
 
-# 3. PROCESADO DE IMAGEN
-foto = st.file_uploader("📷 Sube el albarán", type=['jpg', 'png', 'jpeg'])
+foto = st.file_uploader("📷 Sube la foto del albarán", type=['jpg', 'png', 'jpeg'])
 
-if foto and st.button("🔍 Analizar"):
+if foto and st.button("🔍 Analizar Presupuesto"):
     try:
-        img = Image.open(foto)
+        # Convertimos la imagen a formato que entienda la API directa
+        img_bytes = foto.read()
+        img_b64 = base64.b64encode(img_bytes).decode('utf-8')
         
-        # Probamos el modelo flash-latest que es el más compatible hoy
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # URL de la API estable de Google (v1)
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
         
-        prompt = "Lee este presupuesto. Extrae los productos en este formato exacto: NOMBRE | CANTIDAD | PRECIO_COSTE. No escribas nada más."
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": "Analiza este presupuesto. Extrae los productos en este formato exacto: NOMBRE | CANTIDAD | PRECIO_COSTE_UNITARIO. No escribas nada más."},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
+                ]
+            }]
+        }
         
-        # Llamada directa
-        response = model.generate_content([prompt, img])
+        response = requests.post(url, json=payload)
+        res_json = response.json()
         
-        if response.text:
-            for linea in response.text.split('\n'):
+        # Extraemos el texto de la respuesta
+        texto_ia = res_json['candidates'][0]['content']['parts'][0]['text']
+        
+        if texto_ia:
+            for linea in texto_ia.split('\n'):
                 if '|' in linea:
                     p = linea.split('|')
                     try:
@@ -59,17 +65,10 @@ if foto and st.button("🔍 Analizar"):
                             "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
                         })
                     except: continue
-            st.success("✅ Albarán procesado")
+            st.success("✅ ¡Analizado con éxito!")
     except Exception as e:
-        # Si esto da 404, probamos el modelo pro de respaldo
-        try:
-            model_backup = genai.GenerativeModel('gemini-1.5-pro-latest')
-            response = model_backup.generate_content([prompt, img])
-            st.success("✅ Procesado con modelo de respaldo")
-        except:
-            st.error(f"Error de Google: {e}")
+        st.error(f"Error en la conexión directa: {e}")
 
-# 4. TABLA DE RESULTADOS
 if st.session_state.lista:
     st.write(f"### Presupuesto: {cliente}")
     df = pd.DataFrame(st.session_state.lista)
