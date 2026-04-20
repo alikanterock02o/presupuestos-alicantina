@@ -5,7 +5,7 @@ import base64
 from fpdf import FPDF
 import PyPDF2
 
-# Configuración de página
+# Configuración de página con vuestro estilo
 st.set_page_config(page_title="Alicantina de Vallas", layout="wide")
 
 # 1. LÓGICA DE PRECIOS
@@ -22,11 +22,11 @@ def calcular_pvp(coste_unitario, cantidad):
     else: margen = 1.25
     return coste_unitario * margen
 
-# 2. GENERADOR DE PDF PREMIUM
+# 2. GENERADOR DE PDF PREMIUM (ROJO Y NEGRO)
 def generar_pdf(df, cliente):
     pdf = FPDF()
     pdf.add_page()
-    # Cabecera Roja (Inspirada en tu fachada)
+    # Cabecera Roja (Basada en vuestra fachada)
     pdf.set_fill_color(204, 0, 0) 
     pdf.rect(0, 0, 210, 35, 'F')
     pdf.set_font("Arial", 'B', 20)
@@ -38,7 +38,7 @@ def generar_pdf(df, cliente):
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(100, 10, f"PRESUPUESTO: {cliente.upper()}", ln=True)
     pdf.ln(5)
-    # Tabla Negra
+    # Tabla Negra Industrial
     pdf.set_fill_color(30, 30, 30) 
     pdf.set_text_color(255, 255, 255)
     pdf.cell(100, 10, " PRODUCTO", 1, 0, 'L', True)
@@ -53,7 +53,7 @@ def generar_pdf(df, cliente):
         pdf.cell(20, 9, str(row['Cant']), 1, 0, 'C')
         pdf.cell(35, 9, f"{row['PVP Ud (€)']} e", 1, 0, 'C')
         pdf.cell(35, 9, f"{row['Total (€)']} e", 1, 1, 'C')
-    # Total
+    # Total Final en Rojo
     total_base = df["Total (€)"].sum()
     pdf.ln(10)
     pdf.set_font("Arial", 'B', 14)
@@ -64,7 +64,8 @@ def generar_pdf(df, cliente):
 # 3. INTERFAZ
 st.title("🏗️ Generador Alicantina de Vallas")
 
-if st.button("♻️ Limpiar Errores / Reiniciar"):
+# Botón de reinicio para limpiar el "error rojo" visual
+if st.button("♻️ Reiniciar Sistema (Limpiar Errores)"):
     st.session_state.lista = []
     st.rerun()
 
@@ -78,9 +79,10 @@ archivo = st.file_uploader("📄 Sube el albarán (Foto o PDF)", type=['jpg', 'j
 
 if archivo and st.button("🔍 ANALIZAR AHORA"):
     try:
-        with st.spinner("Leyendo documento..."):
+        with st.spinner("Conectando con el motor de IA..."):
             prompt = "Extrae los productos de este documento. Formato exacto: PRODUCTO | CANTIDAD | PRECIO_UNITARIO"
             
+            # Ajuste de payload según tipo de archivo
             if archivo.type == "application/pdf":
                 reader = PyPDF2.PdfReader(archivo)
                 texto_extraido = "".join([p.extract_text() for p in reader.pages])
@@ -89,8 +91,8 @@ if archivo and st.button("🔍 ANALIZAR AHORA"):
                 img_64 = base64.b64encode(archivo.read()).decode('utf-8')
                 payload = {"contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": archivo.type, "data": img_64}}]}]}
 
-            # URL ESTABLE (v1)
-            url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+            # URL Y MODELO CORREGIDOS PARA MÁXIMA COMPATIBILIDAD
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
             res = requests.post(url, json=payload)
             data = res.json()
 
@@ -106,16 +108,28 @@ if archivo and st.button("🔍 ANALIZAR AHORA"):
                                 c = float(p[1].strip().replace(',','.'))
                                 pr = float(p[2].strip().replace('€','').replace(',','.'))
                                 pvp = calcular_pvp(pr, c)
-                                st.session_state.lista.append({"Descripción": d, "Cant": int(c), "PVP Ud (€)": round(pvp,2), "Total (€)": round(pvp*c,2)})
+                                st.session_state.lista.append({
+                                    "Descripción": d, 
+                                    "Cant": int(c), 
+                                    "PVP Ud (€)": round(pvp,2), 
+                                    "Total (€)": round(pvp*c,2)
+                                })
                             except: continue
-                st.success("✅ Documento procesado")
+                st.success("✅ Documento procesado correctamente")
             else:
-                st.error(f"Error de Google: {data.get('error', {}).get('message', 'Problema de conexión')}")
+                msg_error = data.get('error', {}).get('message', 'Error desconocido')
+                st.error(f"Google dice: {msg_error}")
     except Exception as e:
-        st.error(f"Error inesperado: {e}")
+        st.error(f"Error de conexión: {e}")
 
+# Mostrar tabla y botón de descarga si hay datos
 if st.session_state.lista:
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
     pdf_b = generar_pdf(df, nombre_cliente)
-    st.download_button("📥 DESCARGAR PRESUPUESTO PDF", data=pdf_b, file_name=f"Presupuesto_{nombre_cliente}.pdf", mime="application/pdf")
+    st.download_button(
+        "📥 DESCARGAR PRESUPUESTO PDF", 
+        data=pdf_b, 
+        file_name=f"Presupuesto_{nombre_cliente}.pdf", 
+        mime="application/pdf"
+    )
