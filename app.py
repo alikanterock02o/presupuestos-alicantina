@@ -2,9 +2,8 @@ import streamlit as st
 import pandas as pd
 import requests
 import base64
-import json
+from fpdf import FPDF
 import PyPDF2
-import io
 
 st.set_page_config(page_title="Alicantina de Vallas", layout="wide")
 
@@ -20,9 +19,45 @@ def calcular_pvp(coste):
     elif coste <= 1000.0: return coste * 1.29
     else: return coste * 1.25
 
+# Función para crear el PDF
+def generar_pdf(df, cliente):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(200, 10, "PRESUPUESTO: ALICANTINA DE VALLAS", ln=True, align='C')
+    pdf.ln(10)
+    
+    pdf.set_font("Arial", '', 12)
+    pdf.cell(200, 10, f"Cliente: {cliente}", ln=True)
+    pdf.ln(5)
+    
+    # Cabecera tabla
+    pdf.set_fill_color(200, 220, 255)
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(100, 10, "Descripcion", 1, 0, 'C', True)
+    pdf.cell(20, 10, "Cant.", 1, 0, 'C', True)
+    pdf.cell(30, 10, "PVP Ud.", 1, 0, 'C', True)
+    pdf.cell(30, 10, "Total", 1, 1, 'C', True)
+    
+    # Filas
+    pdf.set_font("Arial", '', 9)
+    for index, row in df.iterrows():
+        pdf.cell(100, 10, str(row['Descripción'])[:50], 1)
+        pdf.cell(20, 10, str(row['Cant']), 1, 0, 'C')
+        pdf.cell(30, 10, f"{row['PVP Ud (€)']} e", 1, 0, 'C')
+        pdf.cell(30, 10, f"{row['Total (€)']} e", 1, 1, 'C')
+    
+    pdf.ln(10)
+    total = df["Total (€)"].sum()
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(200, 10, f"TOTAL Base Imponible: {total:.2f} euros", ln=True, align='R')
+    pdf.cell(200, 10, f"TOTAL con IVA (21%): {total * 1.21:.2f} euros", ln=True, align='R')
+    
+    return pdf.output(dest='S').encode('latin-1')
+
 st.title("🏗️ Generador Alicantina de Vallas")
 api_key = st.secrets["GEMINI_API_KEY"]
-cliente = st.text_input("👤 Nombre del Cliente")
+cliente = st.text_input("👤 Nombre del Cliente", value="General")
 
 if 'lista' not in st.session_state:
     st.session_state.lista = []
@@ -31,7 +66,7 @@ archivo = st.file_uploader("📄 Sube el albarán (Foto o PDF)", type=['jpg', 'j
 
 if archivo and st.button("🔍 Analizar y Calcular"):
     try:
-        with st.spinner("Procesando con Gemini 2.5..."):
+        with st.spinner("Leyendo albarán..."):
             if archivo.type == "application/pdf":
                 reader = PyPDF2.PdfReader(archivo)
                 texto_pdf = "".join([page.extract_text() for page in reader.pages])
@@ -39,14 +74,11 @@ if archivo and st.button("🔍 Analizar y Calcular"):
             else:
                 img_b64 = base64.b64encode(archivo.read()).decode('utf-8')
                 payload = {"contents": [{"parts": [
-                    {"text": "Analiza la imagen y extrae los artículos. Formato: NOMBRE | CANTIDAD | PRECIO_COSTE. No escribas nada más."},
+                    {"text": "Extrae: PRODUCTO | CANTIDAD | PRECIO_COSTE. Solo texto limpio."},
                     {"inline_data": {"mime_type": archivo.type, "data": img_b64}}
                 ]}]}
 
-            # USAMOS EL MODELO QUE TU DIAGNÓSTICO RECOMENDÓ
-            # Usamos v1beta porque es donde viven los modelos 2.5 y 3.x actualmente
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-            
             response = requests.post(url, json=payload)
             res_json = response.json()
 
@@ -67,17 +99,23 @@ if archivo and st.button("🔍 Analizar y Calcular"):
                         except: continue
                 st.success("✅ Albarán procesado")
             else:
-                error_msg = res_json.get('error', {}).get('message', 'Error desconocido')
-                st.error(f"Error de Google: {error_msg}")
-                
+                st.error("Error al conectar con Google. Reintenta en 5 segundos.")
     except Exception as e:
-        st.error(f"Error técnico: {e}")
+        st.error(f"Error: {e}")
 
 if st.session_state.lista:
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
-    total = df["Total (€)"].sum()
-    st.subheader(f"TOTAL con IVA (21%): {total * 1.21:.2f} €")
+    
+    # BOTÓN DE DESCARGA PDF
+    pdf_output = generar_pdf(df, cliente)
+    st.download_button(
+        label="📥 Descargar Presupuesto en PDF",
+        data=pdf_output,
+        file_name=f"Presupuesto_{cliente}.pdf",
+        mime="application/pdf",
+    )
+
     if st.button("🗑️ Limpiar"):
         st.session_state.lista = []
         st.rerun()
