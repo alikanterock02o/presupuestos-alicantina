@@ -149,7 +149,7 @@ Reglas:
                 }
 
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=prompt + "\n\nDOCUMENTO:\n" + texto
             )
 
@@ -157,7 +157,7 @@ Reglas:
             img = PIL.Image.open(archivo)
 
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=[prompt, img]
             )
 
