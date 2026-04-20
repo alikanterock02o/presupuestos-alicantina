@@ -1,20 +1,18 @@
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
-from google.generativeai.types import RequestOptions
 from fpdf import FPDF
 import PyPDF2
 
-# 1. CONFIGURACIÓN CORPORATIVA
-st.set_page_config(page_title="Alicantina de Vallas - Estabilizado", layout="wide")
+# 1. CONFIGURACIÓN
+st.set_page_config(page_title="Alicantina de Vallas - Gestor", layout="wide")
 
-# Forzamos la configuración inicial para evitar v1beta
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
     st.error("⚠️ Configura la API KEY en Secrets.")
 
-# Lógica de márgenes según presupuesto
+# Lógica comercial
 def calcular_pvp(coste, cantidad):
     total = coste * cantidad
     if total <= 0.05: m = 3.0
@@ -28,56 +26,48 @@ def calcular_pvp(coste, cantidad):
     else: m = 1.25
     return coste * m
 
-# 2. MOTOR DE IA FORZADO A V1 (ESTABLE)
+# 2. MOTOR DE ANÁLISIS (Súper simple para evitar TypeError)
 def analizar_documento(archivo):
-    # Forzamos a la API a usar la versión de producción 'v1'
-    # Esto elimina el error 404 de la ruta 'v1beta'
-    opciones = RequestOptions(api_version='v1')
+    # Usamos el modelo directamente, que ya vimos que lo encuentra
     model = genai.GenerativeModel('gemini-1.5-flash')
-    
-    prompt = "Extract data exactly as: PRODUCT | QTY | UNIT_COST. Use only plain text."
+    prompt = "Extrae los datos en este formato: PRODUCTO | CANTIDAD | PRECIO_COSTE. Solo texto plano."
     
     try:
         if archivo.type == "application/pdf":
             reader = PyPDF2.PdfReader(archivo)
             texto = "".join([p.extract_text() for p in reader.pages])
-            response = model.generate_content(f"{prompt}\n\nDocumento:\n{texto}", request_options=opciones)
+            response = model.generate_content(f"{prompt}\n\nDocumento:\n{texto}")
         else:
-            # Procesamiento de imagen (WhatsApp o fotos)
             img_data = archivo.read()
-            response = model.generate_content(
-                contents=[prompt, {"mime_type": archivo.type, "data": img_data}],
-                request_options=opciones
-            )
+            # Formato estándar de imagen
+            response = model.generate_content([prompt, {"mime_type": archivo.type, "data": img_data}])
         return response.text
     except Exception as e:
-        return f"ERROR_TECNICO: {str(e)}"
+        return f"ERROR: {str(e)}"
 
-# 3. INTERFAZ Y FLUJO
-st.title("🏗️ Alicantina de Vallas - Gestor de Presupuestos")
+# 3. INTERFAZ
+st.title("🏗️ Alicantina de Vallas - Gestor")
 
-if st.button("♻️ LIMPIAR TODO"):
+if st.button("♻️ REINICIAR"):
     st.session_state.clear()
     st.rerun()
 
-nombre_cliente = st.text_input("👤 Nombre del Cliente", value="David")
+nombre_cliente = st.text_input("👤 Cliente", value="David")
 
 if 'datos' not in st.session_state:
     st.session_state.datos = []
 
-archivo = st.file_uploader("📄 Sube tu albarán (Foto o PDF)", type=['jpg', 'jpeg', 'png', 'pdf'])
+archivo = st.file_uploader("📄 Sube foto o PDF", type=['jpg', 'jpeg', 'png', 'pdf'])
 
-if archivo and st.button("🚀 PROCESAR AHORA"):
-    with st.spinner("Analizando vía Servidor Estable (v1)..."):
+if archivo and st.button("🚀 ANALIZAR"):
+    with st.spinner("Leyendo albarán..."):
         resultado = analizar_documento(archivo)
         
-        if "ERROR_TECNICO" in resultado:
-            st.error(f"Error detectado: {resultado}")
-            st.info("Si el error persiste, es un bloqueo de Google en esta zona horaria. Reintenta en 1 minuto.")
+        if "ERROR" in resultado:
+            st.error(resultado)
         else:
-            lineas = resultado.split('\n')
             temp_lista = []
-            for l in lineas:
+            for l in resultado.split('\n'):
                 if '|' in l:
                     try:
                         partes = l.split('|')
@@ -95,25 +85,19 @@ if archivo and st.button("🚀 PROCESAR AHORA"):
                     except: continue
             st.session_state.datos = temp_lista
 
-# 4. TABLA DE RESULTADOS Y EXPORTACIÓN
+# 4. RESULTADOS
 if st.session_state.datos:
     df = pd.DataFrame(st.session_state.datos)
-    st.subheader(f"Presupuesto para: {nombre_cliente}")
     st.table(df)
     
-    total_presupuesto = df["Total (€)"].sum()
-    st.metric("Total Neto", f"{total_presupuesto:.2f} €")
-
-    # Generación simple de PDF
+    # PDF Minimalista
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(190, 10, "ALICANTINA DE VALLAS - PRESUPUESTO", ln=True, align='C')
-    pdf.set_font("Arial", '', 10)
+    pdf.cell(190, 10, f"PRESUPUESTO: {nombre_cliente}", ln=True, align='C')
     pdf.ln(10)
+    pdf.set_font("Arial", '', 10)
     for _, fila in df.iterrows():
-        linea = f"{fila['Cant']}x {fila['Descripción'][:40]}... | {fila['Total (€)']} e"
-        pdf.cell(190, 8, linea, ln=True)
+        pdf.cell(190, 8, f"{fila['Cant']}x {fila['Descripción'][:50]}... | {fila['Total (€)']} e", ln=True)
     
-    pdf_output = pdf.output(dest='S').encode('latin-1', 'ignore')
-    st.download_button("📥 DESCARGAR PRESUPUESTO PDF", data=pdf_output, file_name=f"Presupuesto_{nombre_cliente}.pdf")
+    st.download_button("📥 DESCARGAR PDF", data=pdf.output(dest='S').encode('latin-1', 'ignore'), file_name="Presupuesto.pdf")
