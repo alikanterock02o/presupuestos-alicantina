@@ -1,10 +1,10 @@
 import streamlit as st
-import pandas as pd
 import google.generativeai as genai
 from PIL import Image
+import pandas as pd
 
-# 1. CONFIGURACIÓN
-st.set_page_config(page_title="Alicantina de Vallas - Smart", page_icon="🏗️", layout="wide")
+# CONFIGURACIÓN BÁSICA
+st.set_page_config(page_title="Alicantina de Vallas", layout="wide")
 
 def calcular_pvp(coste):
     if coste <= 0.05: return coste * 3.0
@@ -17,82 +17,56 @@ def calcular_pvp(coste):
     elif coste <= 1000.0: return coste * 1.29
     else: return coste * 1.25
 
-# 2. CONEXIÓN BLINDADA
-# Forzamos el uso de la versión estable de la API para evitar el error 404
+# CONEXIÓN
 if "GEMINI_API_KEY" not in st.secrets:
-    st.error("❌ Configura la clave en Secrets.")
+    st.error("Falta la clave en Secrets")
 else:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 st.title("🏗️ Generador Automático")
-st.write("Mantenimientos Alicantina de Vallas S.L.")
-
-cliente = st.text_input("👤 Nombre del Cliente Final")
+cliente = st.text_input("👤 Nombre del Cliente")
 
 if 'lista' not in st.session_state:
     st.session_state.lista = []
 
-st.markdown("---")
-foto = st.file_uploader("📷 Sube la captura del presupuesto", type=['jpg', 'png', 'jpeg'])
+foto = st.file_uploader("📷 Sube el presupuesto del proveedor", type=['jpg', 'png', 'jpeg'])
 
 if foto and st.button("🔍 Analizar y Calcular"):
     try:
-        with st.spinner('Leyendo albarán...'):
-            img = Image.open(foto)
-            # USAMOS EL MODELO POR DEFECTO MÁS COMPATIBLE
-            model = genai.GenerativeModel('models/gemini-1.5-flash')
-            
-            prompt = "Extrae productos de este albarán: NOMBRE | CANTIDAD | PRECIO_COSTE. Solo texto, sin euros."
-            
-            # El cambio clave: quitamos parámetros extraños que dan error
-            response = model.generate_content([prompt, img])
-            
-            lineas = response.text.split('\n')
-            nuevos_items = []
-            for linea in lineas:
-                if '|' in linea:
-                    p = linea.split('|')
-                    try:
-                        d = p[0].strip()
-                        n = float(p[1].strip().replace(',', '.'))
-                        c = float(p[2].strip().replace(',', '.').replace('€', ''))
-                        pvp = calcular_pvp(c)
-                        nuevos_items.append({
-                            "Descripción": d, "Cant": int(n), 
-                            "Precio Ud. (€)": round(pvp, 2), "Total (€)": round(pvp * n, 2)
-                        })
-                    except: continue
-            
-            if nuevos_items:
-                st.session_state.lista = nuevos_items
-                st.success("✅ ¡Leído correctamente!")
+        img = Image.open(foto)
+        # Usamos el nombre de modelo más básico para evitar el 404
+        model = genai.GenerativeModel('gemini-pro-vision')
+        
+        prompt = "Analiza la imagen y extrae los productos en este formato: NOMBRE | CANTIDAD | PRECIO_COSTE. No escribas nada más."
+        
+        response = model.generate_content([prompt, img])
+        
+        lineas = response.text.split('\n')
+        for linea in lineas:
+            if '|' in linea:
+                partes = linea.split('|')
+                try:
+                    desc = partes[0].strip()
+                    cant = float(partes[1].strip().replace(',', '.'))
+                    coste = float(partes[2].strip().replace(',', '.').replace('€', ''))
+                    pvp = calcular_pvp(coste)
+                    st.session_state.lista.append({
+                        "Descripción": desc, "Cant": int(cant), 
+                        "Precio Ud. (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
+                    })
+                except: continue
+        st.success("¡Lectura finalizada!")
     except Exception as e:
-        # Si falla el flash, intentamos el pro automáticamente
-        try:
-            model = genai.GenerativeModel('models/gemini-1.5-pro')
-            response = model.generate_content([prompt, img])
-            # ... (mismo proceso de lectura)
-            st.success("✅ Leído con modelo Pro")
-        except:
-            st.error(f"⚠️ Error de conexión con Google: {e}. Revisa que la API Key sea correcta.")
+        st.error(f"Error: {e}")
 
-# 3. TABLA Y LOGO
+# MOSTRAR RESULTADOS
 if st.session_state.lista:
     st.markdown("---")
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        try: st.image("logo.png", width=150)
-        except: st.write("**LOGO**")
-    with col2:
-        st.subheader("MANTENIMIENTOS ALICANTINA DE VALLAS S.L.")
-        st.write(f"**CLIENTE:** {cliente.upper()}")
-
+    st.subheader(f"Presupuesto: {cliente}")
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
-    
     total = df["Total (€)"].sum()
-    st.subheader(f"TOTAL (IVA Inc.): {total * 1.21:.2f} €")
-    
-    if st.button("🗑️ Nuevo"):
+    st.subheader(f"TOTAL + IVA: {total * 1.21:.2f} €")
+    if st.button("Limpiar"):
         st.session_state.lista = []
         st.rerun()
