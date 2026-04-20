@@ -3,7 +3,7 @@ import google.generativeai as genai
 from PIL import Image
 import pandas as pd
 
-# CONFIGURACIÓN BÁSICA
+# 1. CONFIGURACIÓN
 st.set_page_config(page_title="Alicantina de Vallas", layout="wide")
 
 def calcular_pvp(coste):
@@ -17,30 +17,33 @@ def calcular_pvp(coste):
     elif coste <= 1000.0: return coste * 1.29
     else: return coste * 1.25
 
-# CONEXIÓN
-if "GEMINI_API_KEY" not in st.secrets:
-    st.error("Falta la clave en Secrets")
-else:
+# 2. CONEXIÓN (Secrets)
+if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+else:
+    st.error("Falta la clave API en Secrets")
 
-st.title("🏗️ Generador Automático")
-cliente = st.text_input("👤 Nombre del Cliente")
+st.title("🏗️ Generador Alicantina de Vallas")
+
+cliente = st.text_input("👤 Nombre del Cliente Final")
 
 if 'lista' not in st.session_state:
     st.session_state.lista = []
 
+# 3. SUBIDA DE FOTO
 foto = st.file_uploader("📷 Sube el presupuesto del proveedor", type=['jpg', 'png', 'jpeg'])
 
-if foto and st.button("🔍 Analizar y Calcular"):
+if foto and st.button("🔍 Analizar Presupuesto"):
     try:
         img = Image.open(foto)
-        # Usamos el nombre de modelo más básico para evitar el 404
-        model = genai.GenerativeModel('gemini-pro-vision')
+        # Usamos el modelo 'gemini-1.5-flash' que es el estándar actual
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
-        prompt = "Analiza la imagen y extrae los productos en este formato: NOMBRE | CANTIDAD | PRECIO_COSTE. No escribas nada más."
+        prompt = "Analiza este presupuesto. Extrae los artículos en este formato exacto: NOMBRE | CANTIDAD | PRECIO_COSTE. Usa puntos para decimales."
         
         response = model.generate_content([prompt, img])
         
+        # Procesar texto
         lineas = response.text.split('\n')
         for linea in lineas:
             if '|' in linea:
@@ -52,21 +55,23 @@ if foto and st.button("🔍 Analizar y Calcular"):
                     pvp = calcular_pvp(coste)
                     st.session_state.lista.append({
                         "Descripción": desc, "Cant": int(cant), 
-                        "Precio Ud. (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
+                        "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * cant, 2)
                     })
                 except: continue
-        st.success("¡Lectura finalizada!")
+        st.success("¡Leído!")
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Hubo un problema: {e}")
 
-# MOSTRAR RESULTADOS
+# 4. RESULTADO
 if st.session_state.lista:
     st.markdown("---")
-    st.subheader(f"Presupuesto: {cliente}")
+    st.write(f"### Presupuesto para: {cliente}")
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
+    
     total = df["Total (€)"].sum()
-    st.subheader(f"TOTAL + IVA: {total * 1.21:.2f} €")
-    if st.button("Limpiar"):
+    st.subheader(f"TOTAL con IVA: {total * 1.21:.2f} €")
+    
+    if st.button("Limpiar todo"):
         st.session_state.lista = []
         st.rerun()
