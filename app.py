@@ -8,6 +8,7 @@ import io
 
 st.set_page_config(page_title="Alicantina de Vallas", layout="wide")
 
+# Lógica de precios
 def calcular_pvp(coste):
     if coste <= 0.05: return coste * 3.0
     elif coste <= 0.25: return coste * 2.5
@@ -30,7 +31,7 @@ archivo = st.file_uploader("📄 Sube el albarán (Foto o PDF)", type=['jpg', 'j
 
 if archivo and st.button("🔍 Analizar y Calcular"):
     try:
-        with st.spinner("Conectando con Google..."):
+        with st.spinner("Procesando con Gemini 2.5..."):
             if archivo.type == "application/pdf":
                 reader = PyPDF2.PdfReader(archivo)
                 texto_pdf = "".join([page.extract_text() for page in reader.pages])
@@ -38,12 +39,14 @@ if archivo and st.button("🔍 Analizar y Calcular"):
             else:
                 img_b64 = base64.b64encode(archivo.read()).decode('utf-8')
                 payload = {"contents": [{"parts": [
-                    {"text": "Extrae: PRODUCTO | CANTIDAD | PRECIO_COSTE."},
+                    {"text": "Analiza la imagen y extrae los artículos. Formato: NOMBRE | CANTIDAD | PRECIO_COSTE. No escribas nada más."},
                     {"inline_data": {"mime_type": archivo.type, "data": img_b64}}
                 ]}]}
 
-            # USAMOS EL MODELO ESTABLE (v1 en lugar de v1beta para evitar el 404)
-            url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+            # USAMOS EL MODELO QUE TU DIAGNÓSTICO RECOMENDÓ
+            # Usamos v1beta porque es donde viven los modelos 2.5 y 3.x actualmente
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+            
             response = requests.post(url, json=payload)
             res_json = response.json()
 
@@ -62,15 +65,13 @@ if archivo and st.button("🔍 Analizar y Calcular"):
                                 "PVP Ud (€)": round(pvp_ud, 2), "Total (€)": round(pvp_ud * cant, 2)
                             })
                         except: continue
-                st.success("✅ Procesado correctamente")
-            elif 'error' in res_json:
-                msg = res_json['error'].get('message', '')
-                if "high demand" in msg.lower():
-                    st.warning("⚠️ Google está saturado ahora mismo. Espera 10 segundos y vuelve a pulsar el botón.")
-                else:
-                    st.error(f"Error: {msg}")
+                st.success("✅ Albarán procesado")
+            else:
+                error_msg = res_json.get('error', {}).get('message', 'Error desconocido')
+                st.error(f"Error de Google: {error_msg}")
+                
     except Exception as e:
-        st.error(f"Error inesperado: {e}")
+        st.error(f"Error técnico: {e}")
 
 if st.session_state.lista:
     df = pd.DataFrame(st.session_state.lista)
