@@ -3,23 +3,16 @@ import pandas as pd
 import google.generativeai as genai
 from fpdf import FPDF
 import PyPDF2
-import io
 
-# 1. ESTILO CORPORATIVO ALICANTINA DE VALLAS
-st.set_page_config(page_title="Alicantina de Vallas | Gestión", layout="wide")
+# 1. CONFIGURACIÓN E IDENTIDAD CORPORATIVA
+st.set_page_config(page_title="Alicantina de Vallas | Facturación", layout="wide")
 
-# Configuración de IA con ruta de transporte forzada
 if "GEMINI_API_KEY" in st.secrets:
-    try:
-        # Usamos transport='rest' para evitar los errores 404 de v1beta/v1
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"], transport='rest')
-        model = genai.GenerativeModel('gemini-1.5-flash')
-    except Exception as e:
-        st.error(f"Error de inicialización: {e}")
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("⚠️ Falta GEMINI_API_KEY en los Secrets de Streamlit.")
+    st.error("Configura la API KEY en Secrets.")
 
-# Lógica de márgenes comercial
+# Lógica de márgenes Alicantina de Vallas
 def calcular_pvp(coste, cantidad):
     total = coste * cantidad
     if total <= 0.05: m = 3.0
@@ -33,26 +26,45 @@ def calcular_pvp(coste, cantidad):
     else: m = 1.25
     return coste * m
 
-# 2. GENERADOR DE PDF PROFESIONAL
+# 2. PROCESO DE IA CON FALLBACK (ANTI-404)
+def analizar_con_ia(archivo):
+    # Intentamos primero con Flash (rápido), si falla vamos a Pro (robusto)
+    modelos_a_probar = ['gemini-1.5-flash', 'gemini-1.5-pro']
+    
+    for nombre_modelo in modelos_a_probar:
+        try:
+            model = genai.GenerativeModel(nombre_modelo)
+            prompt = "Extract: ITEM | QTY | UNIT_PRICE. Clean text only."
+            
+            if archivo.type == "application/pdf":
+                reader = PyPDF2.PdfReader(archivo)
+                texto = "".join([p.extract_text() for p in reader.pages])
+                res = model.generate_content(f"{prompt}\n\nDocumento:\n{texto}")
+            else:
+                img = archivo.read()
+                res = model.generate_content([prompt, {"mime_type": archivo.type, "data": img}])
+            
+            if res.text: return res.text
+        except Exception:
+            continue # Si falla uno, salta al siguiente modelo
+    return None
+
+# 3. GENERADOR DE PDF ALICANTINA
 def generar_pdf(df, cliente):
     pdf = FPDF()
     pdf.add_page()
-    # Encabezado Rojo Alicantina
-    pdf.set_fill_color(204, 0, 0) 
+    pdf.set_fill_color(204, 0, 0) # Rojo corporativo
     pdf.rect(0, 0, 210, 35, 'F')
     pdf.set_font("Arial", 'B', 22)
     pdf.set_text_color(255, 255, 255)
     pdf.cell(190, 15, "ALICANTINA DE VALLAS", ln=True, align='C')
     pdf.ln(20)
-    # Tabla Industrial
-    pdf.set_fill_color(30, 30, 30)
-    pdf.set_text_color(255, 255, 255)
+    pdf.set_fill_color(40, 40, 40)
     pdf.set_font("Arial", 'B', 10)
     pdf.cell(100, 10, " PRODUCTO", 1, 0, 'L', True)
     pdf.cell(20, 10, "CANT.", 1, 0, 'C', True)
     pdf.cell(35, 10, "PVP UD.", 1, 0, 'C', True)
     pdf.cell(35, 10, "TOTAL", 1, 1, 'C', True)
-    # Datos
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("Arial", '', 9)
     for _, row in df.iterrows():
@@ -60,18 +72,17 @@ def generar_pdf(df, cliente):
         pdf.cell(20, 9, str(row['Cant']), 1, 0, 'C')
         pdf.cell(35, 9, f"{row['PVP Ud (€)']} e", 1, 0, 'C')
         pdf.cell(35, 9, f"{row['Total (€)']} e", 1, 1, 'C')
-    # Total
-    t_f = df["Total (€)"].sum()
+    t_final = df["Total (€)"].sum()
     pdf.ln(10)
     pdf.set_font("Arial", 'B', 14)
     pdf.set_text_color(204, 0, 0)
-    pdf.cell(190, 10, f"TOTAL IVA INCLUIDO: {t_f * 1.21:.2f} e", 0, 1, 'R')
+    pdf.cell(190, 10, f"TOTAL IVA INCLUIDO (21%): {t_final * 1.21:.2f} e", 0, 1, 'R')
     return pdf.output(dest='S').encode('latin-1', 'ignore')
 
-# 3. INTERFAZ
+# 4. INTERFAZ DE USUARIO
 st.title("🏗️ Alicantina de Vallas - Gestor de Albaranes")
 
-if st.button("♻️ LIMPIAR TODO Y REINICIAR"):
+if st.button("♻️ REINICIAR Y LIMPIAR CACHÉ"):
     st.session_state.lista = []
     st.rerun()
 
@@ -80,44 +91,29 @@ nombre_c = st.text_input("👤 Cliente", value="David")
 if 'lista' not in st.session_state:
     st.session_state.lista = []
 
-archivo = st.file_uploader("📄 Sube tu documento", type=['jpg', 'jpeg', 'png', 'pdf'])
+archivo = st.file_uploader("📄 Sube el documento", type=['jpg', 'jpeg', 'png', 'pdf'])
 
-if archivo and st.button("🔍 PROCESAR AHORA"):
-    try:
-        with st.spinner("Analizando con Google AI (Ruta REST)..."):
-            prompt = "Extract items. Format: ITEM | QTY | UNIT_PRICE. NO markdown, NO text."
-            
-            if archivo.type == "application/pdf":
-                reader = PyPDF2.PdfReader(archivo)
-                texto = "".join([p.extract_text() for p in reader.pages])
-                response = model.generate_content(f"{prompt}\n\nData:\n{texto}")
-            else:
-                img_bytes = archivo.read()
-                response = model.generate_content([prompt, {"mime_type": archivo.type, "data": img_bytes}])
-
-            if response.text:
-                st.session_state.lista = []
-                for linea in response.text.split('\n'):
-                    if '|' in linea:
-                        pts = linea.split('|')
-                        if len(pts) >= 3:
-                            try:
-                                d = pts[0].strip()
-                                c = float(pts[1].strip().replace(',','.'))
-                                p_in = float(pts[2].strip().replace('€','').replace(',','.'))
-                                pvp = calcular_pvp(p_in, c)
-                                st.session_state.lista.append({
-                                    "Descripción": d, "Cant": int(c),
-                                    "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * c, 2)
-                                })
-                            except: continue
-                st.success("✅ Documento procesado correctamente.")
-    except Exception as e:
-        st.error(f"Error técnico detectado: {str(e)}")
-        st.info("💡 Si el error persiste, comprueba que 'google-generativeai' esté actualizado en tu requirements.txt")
+if archivo and st.button("🔍 ANALIZAR DOCUMENTO"):
+    with st.spinner("Conectando con servidores estables de Google..."):
+        resultado_texto = analizar_con_ia(archivo)
+        
+        if resultado_texto:
+            st.session_state.lista = []
+            for linea in resultado_texto.split('\n'):
+                if '|' in linea:
+                    pts = linea.split('|')
+                    if len(pts) >= 3:
+                        try:
+                            d, c, p = pts[0].strip(), float(pts[1].strip().replace(',','.')), float(pts[2].strip().replace('€','').replace(',','.'))
+                            pvp = calcular_pvp(p, c)
+                            st.session_state.lista.append({"Descripción": d, "Cant": int(c), "PVP Ud (€)": round(pvp, 2), "Total (€)": round(pvp * c, 2)})
+                        except: continue
+            st.success("✅ Análisis realizado.")
+        else:
+            st.error("❌ Google sigue devolviendo error 404 en tu zona. Intenta 'Reboot' desde el panel de Streamlit.")
 
 if st.session_state.lista:
     df = pd.DataFrame(st.session_state.lista)
     st.table(df)
     pdf_out = generar_pdf(df, nombre_c)
-    st.download_button("📥 DESCARGAR PDF", data=pdf_out, file_name=f"Presupuesto_{nombre_c}.pdf")
+    st.download_button("📥 DESCARGAR PRESUPUESTO", data=pdf_out, file_name=f"Presupuesto_{nombre_c}.pdf")
