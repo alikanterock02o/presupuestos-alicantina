@@ -1,6 +1,7 @@
 import json
 import re
 import os
+import time
 from datetime import datetime
 from io import BytesIO
 
@@ -21,11 +22,11 @@ st.set_page_config(
 # =====================================
 EMPRESA_NOMBRE = "Alicantina de Vallas"
 EMPRESA_SUBTITULO = "Presupuestos"
-EMPRESA_DIRECCION = "Calle Burgos 12-14, 03015, Alicante"
-EMPRESA_EMAIL = "compras@alicantinadevallas.com"
-EMPRESA_TELEFONO = "692 607 896"
+EMPRESA_DIRECCION = "Torrellano, Alicante"
+EMPRESA_EMAIL = "info@alicantinadevallas.com"
+EMPRESA_TELEFONO = "965 XXX XXX"
 EMPRESA_WEB = "www.alicantinadevallas.com"
-LOGO_PATH = "logo.png"   # pon tu logo en la raíz del proyecto
+LOGO_PATH = "logo.png"
 
 HISTORIAL_CSV = "historial_presupuestos.csv"
 os.makedirs("data", exist_ok=True)
@@ -198,35 +199,42 @@ Reglas:
                     "error": "No se pudo extraer texto del PDF. Puede ser un PDF escaneado como imagen."
                 }
 
-           import time
+            response = None
+            ultimo_error = None
 
-for intento in range(3):
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt + "\n\nDOCUMENTO:\n" + texto
-        )
-        break
-    except Exception as e:
-        if intento == 2:
-            raise e
-        time.sleep(2)
+            for intento in range(3):
+                try:
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt + "\n\nDOCUMENTO:\n" + texto
+                    )
+                    break
+                except Exception as e:
+                    ultimo_error = e
+                    if intento < 2:
+                        time.sleep(2)
+                    else:
+                        raise ultimo_error
+
         else:
             img = PIL.Image.open(archivo)
 
-           import time
+            response = None
+            ultimo_error = None
 
-for intento in range(3):
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt + "\n\nDOCUMENTO:\n" + texto
-        )
-        break
-    except Exception as e:
-        if intento == 2:
-            raise e
-        time.sleep(2)
+            for intento in range(3):
+                try:
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=[prompt, img]
+                    )
+                    break
+                except Exception as e:
+                    ultimo_error = e
+                    if intento < 2:
+                        time.sleep(2)
+                    else:
+                        raise ultimo_error
 
         texto_respuesta = getattr(response, "text", None)
 
