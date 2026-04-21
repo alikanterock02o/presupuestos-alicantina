@@ -198,17 +198,35 @@ Reglas:
                     "error": "No se pudo extraer texto del PDF. Puede ser un PDF escaneado como imagen."
                 }
 
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt + "\n\nDOCUMENTO:\n" + texto
-            )
+           import time
+
+for intento in range(3):
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt + "\n\nDOCUMENTO:\n" + texto
+        )
+        break
+    except Exception as e:
+        if intento == 2:
+            raise e
+        time.sleep(2)
         else:
             img = PIL.Image.open(archivo)
 
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[prompt, img]
-            )
+           import time
+
+for intento in range(3):
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt + "\n\nDOCUMENTO:\n" + texto
+        )
+        break
+    except Exception as e:
+        if intento == 2:
+            raise e
+        time.sleep(2)
 
         texto_respuesta = getattr(response, "text", None)
 
